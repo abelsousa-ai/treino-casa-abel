@@ -629,29 +629,41 @@ function savePesos(p){
 }
 
 /* =========================================================
-   ÁUDIO / VIBRAÇÃO
+   AUDIO / VIBRACAO
    ========================================================= */
 let audioCtx = null;
-function beep(freq=880, dur=0.12, vol=0.18){
+function beep(freq, dur, vol, delay){
+  freq = freq||880; dur = dur||0.12; vol = vol||0.18; delay = delay||0;
   try{
     if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
     if(audioCtx.state === 'suspended') audioCtx.resume();
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
     o.type = 'sine'; o.frequency.value = freq;
-    g.gain.value = vol;
+    g.gain.setValueAtTime(0.001, audioCtx.currentTime + delay);
+    g.gain.exponentialRampToValueAtTime(vol, audioCtx.currentTime + delay + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + dur);
     o.connect(g); g.connect(audioCtx.destination);
-    o.start();
-    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
-    o.stop(audioCtx.currentTime + dur + 0.02);
+    o.start(audioCtx.currentTime + delay);
+    o.stop(audioCtx.currentTime + delay + dur + 0.05);
   }catch(e){}
 }
 function vibrate(pattern){
   try{ if(navigator.vibrate) navigator.vibrate(pattern); }catch(e){}
 }
-function tickSound(){ beep(660,0.08,0.12); }
-function transitionSound(){ beep(990,0.18,0.2); vibrate([0,140]); }
-function finishSound(){ beep(1200,0.12,0.22); setTimeout(()=>beep(1500,0.18,0.22),140); vibrate([0,120,80,200]); }
+function tickSound(remaining){
+  var freqs = {3:880, 2:660, 1:440};
+  var freq = freqs[remaining] || 660;
+  var vol = remaining === 1 ? 0.25 : 0.18;
+  var dur = remaining === 1 ? 0.18 : 0.1;
+  beep(freq, dur, vol);
+}
+function transitionSound(fase){
+  if(fase === 'rest'){ beep(660,0.15,0.2); beep(550,0.2,0.18,0.18); }
+  else { beep(880,0.12,0.25); beep(1100,0.12,0.25,0.15); }
+  vibrate([0,140]);
+}
+function finishSound(){ beep(1100,0.12,0.22); beep(880,0.12,0.22,0,0.15); beep(660,0.18,0.22,0,0.30); vibrate([0,120,80,200]); }
 
 let wakeLock = null;
 async function requestWakeLock(){
@@ -1201,20 +1213,21 @@ function tickTimer(){
   if(step.tipo === 'bloco-continuo'){
     const info = computeFaseInfo(step, exec.timer.remaining);
     if(info.remainingInFase <= 3 && info.remainingInFase > 0){
-      tickSound();
+      tickSound(info.remainingInFase);
     }
     if(info.index !== exec.timer._lastFaseIndex){
-      transitionSound();
+      const novaFase = step.fases[info.index] ? step.fases[info.index].fase : 'work';
+      transitionSound(novaFase);
       exec.timer._lastFaseIndex = info.index;
     }
   } else {
     if(exec.timer.remaining <= 3 && exec.timer.remaining > 0){
-      tickSound();
+      tickSound(exec.timer.remaining);
     }
   }
   if(exec.timer.remaining <= 0){
     clearTimerInterval();
-    transitionSound();
+    transitionSound(step.fase || 'work');
     renderExecLayer();
     setTimeout(()=>{ if(exec.active) nextStep(); }, 350);
     return;
@@ -1349,6 +1362,7 @@ function exitExec(save){
 function finishWorkout(){
   clearTimerInterval();
   releaseWakeLock();
+  finishSound();
   const duracaoMin = Math.max(1, Math.round((Date.now()-exec.startedAt)/60000));
   const numExercicios = exec.steps.reduce((acc,s)=>{
     if(s.bloco==='Aquecimento' || s.bloco==='Arrefecimento') return acc;
